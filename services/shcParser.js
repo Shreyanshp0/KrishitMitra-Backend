@@ -1,6 +1,4 @@
 const axios = require("axios");
-const { parseSHCTextLocal } = require("./fallbackParser");
-const { extractText } = require("./ocrService"); // Added to allow parser to trigger OCR as fallback
 
 const coerceNumber = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -12,16 +10,6 @@ const coerceNumber = (value) => {
   if (!normalized) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
-};
-
-const normalizeNutrientCategory = (value) => {
-  const v = String(value || "").trim().toLowerCase();
-  if (!v) return null;
-
-  if (v.includes("low")) return "low";
-  if (v.includes("medium") || v.includes("moderate") || v.includes("normal")) return "medium";
-  if (v.includes("high")) return "high";
-  return null;
 };
 
 const threshold = (envName, fallback) => {
@@ -45,9 +33,9 @@ const normalizePhFromNumeric = (value) => {
 
 /**
  * Calls Gemini API to parse SHC data.
- * Supports Multimodal (Image) or Text-based parsing.
+ * Supports Multimodal (Image/PDF) parsing.
  */
-const getGeminiShcParsing = async (rawText, imageBuffer = null, mimeType = null) => {
+const getGeminiShcParsing = async (imageBuffer, mimeType) => {
   try {
     const apiKey = process.env.GeminiAPI;
     if (!apiKey) throw new Error("GeminiAPI key is missing in .env");
@@ -62,41 +50,20 @@ You are a specialized OCR engine and Agricultural Data Scientist trained on Indi
 🎯 OBJECTIVE
 -----------------------------------
 
-Extract ALL soil parameter data from the provided document (text or image) and return a COMPLETE, VALID JSON object.
-
-The document may vary in format, layout, or quality.
-
------------------------------------
-📌 DOCUMENT CONTEXT
------------------------------------
-
-- The input is a Soil Health Card (SHC) issued under Government of India schemes.
-- The document typically contains:
-  - Farmer/location details
-  - A table of soil parameters
-  - Result values + units
-  - Status (Low/Medium/High/Normal)
+Extract ALL soil parameter data from the provided document and return a COMPLETE, VALID JSON object.
 
 -----------------------------------
 🧠 EXTRACTION RULES (STRICT)
 -----------------------------------
 
-1. COMPLETE TABLE EXTRACTION (CRITICAL)
-- Extract EVERY row from the soil parameter table
-- Do NOT skip any parameter even if unclear
+1. COMPLETE TABLE EXTRACTION
+- Extract EVERY row from the soil parameter table.
 
------------------------------------
 2. VALUE NORMALIZATION
------------------------------------
+- Convert numeric values to float or integer.
+- Remove units (kg/ha, %, dS/m, etc.).
 
-- Convert numeric values to float or integer
-- Remove units (kg/ha, %, dS/m, etc.)
-- Extract only numeric values
-
------------------------------------
 3. MANDATORY VALIDATION
------------------------------------
-
 Ensure these are NOT missed:
 - Nitrogen (N)
 - Phosphorus (P)
@@ -132,23 +99,20 @@ Do NOT include explanations or markdown.
     "ph": ""
   }
 }
-${rawText ? `\nRAW TEXT TO PARSE:\n${rawText}` : ""}
 `;
 
-    // Construct Multimodal Payload
-    const parts = [{ text: prompt }];
-    
-    if (imageBuffer) {
-      parts.push({
-        inlineData: {
-          mimeType: mimeType || "image/jpeg",
-          data: imageBuffer.toString("base64")
-        }
-      });
-    }
-
     const payload = {
-      contents: [{ parts }],
+      contents: [{
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: mimeType || "image/jpeg",
+              data: imageBuffer.toString("base64")
+            }
+          }
+        ]
+      }],
       generationConfig: {
         temperature: 0.1,
         responseMimeType: "application/json"
@@ -169,38 +133,15 @@ ${rawText ? `\nRAW TEXT TO PARSE:\n${rawText}` : ""}
     return JSON.parse(textRes);
   } catch (error) {
     console.error("Gemini Parsing Error:", error.response?.data || error.message);
-    throw error;
+    throw new Error("Unable to parse Soil Health Card document. Ensure the image/PDF is clear.");
   }
 };
 
 /**
  * Main parser entry point.
- * Tries Gemini Vision first, falls back to Tesseract OCR + Local Parser.
  */
-const parseAndNormalizeShcText = async (rawText, imageBuffer = null, mimeType = null, imagePath = null) => {
-  let geminiData;
-  try {
-    console.log("Attempting Gemini Multimodal Parsing...");
-    geminiData = await getGeminiShcParsing(rawText, imageBuffer, mimeType);
-    console.log("Gemini Parsing Successful");
-  } catch (error) {
-    console.warn("Gemini Multimodal Parsing Failed, falling back to local OCR:", error.message);
-    
-    // 1. Get OCR Text locally if not already provided
-    let textToUse = rawText;
-    if (!textToUse && imagePath) {
-      try {
-        const { extractText } = require("./ocrService");
-        textToUse = await extractText(imagePath);
-      } catch (ocrError) {
-        console.error("Local OCR Fallback Failed:", ocrError.message);
-        throw new Error("Unable to parse document. Both Gemini and local OCR failed.");
-      }
-    }
-
-    // 2. Use Local Regex Parser
-    geminiData = parseSHCTextLocal(textToUse || "");
-  }
+const parseAndNormalizeShcText = async (imageBuffer, mimeType) => {
+  const geminiData = await getGeminiShcParsing(imageBuffer, mimeType);
   
   const rawData = geminiData.rawData || {};
   const processedData = geminiData.processedData || {};

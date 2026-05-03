@@ -1,9 +1,7 @@
 const fs = require("fs/promises");
-const path = require("path");
+const fsNode = require("fs");
 const SHC = require("../models/SHC");
-const { extractText } = require("../services/ocrService");
 const { parseAndNormalizeShcText } = require("../services/shcParser");
-const { convertPdfToImage } = require("../utils/pdfConverter");
 const { compressImage } = require("../utils/imageProcessor");
 
 const safeUnlink = async (filePath) => {
@@ -17,12 +15,10 @@ const safeUnlink = async (filePath) => {
 
 const uploadShc = async (req, res, next) => {
   const originalFilePath = req.file?.path;
-  let convertedImagePath = null;
-  let processingPath = originalFilePath;
 
   try {
     console.log("-----------------------------------");
-    console.log("OCR Pipeline Started");
+    console.log("SHC Processing Started");
     console.log("File Type:", req.file?.mimetype);
 
     if (!req.user?._id) {
@@ -39,31 +35,18 @@ const uploadShc = async (req, res, next) => {
       });
     }
 
-    // 1. Handle PDF conversion if necessary
-    if (req.file.mimetype === "application/pdf") {
-      try {
-        convertedImagePath = await convertPdfToImage(originalFilePath);
-        processingPath = convertedImagePath;
-        console.log("Converted Image Path:", convertedImagePath);
-      } catch (convError) {
-        console.error("PDF Conversion Error:", convError.message);
-        throw new Error("Failed to process PDF document. Please upload a clear image instead.");
-      }
+    let imageBuffer = fsNode.readFileSync(originalFilePath);
+    const mimeType = req.file.mimetype;
+
+    // Apply compression ONLY for images (Gemini handles PDF directly without needing compression here)
+    if (mimeType.startsWith("image/")) {
+      imageBuffer = await compressImage(imageBuffer);
     }
 
-    // 2. Read file into Buffer and Compress for Gemini Multimodal
-    const fsNode = require("fs");
-    let imageBuffer = fsNode.readFileSync(processingPath);
-    
-    // Compress image to save quota/tokens
-    imageBuffer = await compressImage(imageBuffer);
-    
-    const mimeType = req.file.mimetype === "application/pdf" ? "image/jpeg" : req.file.mimetype;
-
-    // 3. Parse using Gemini Vision (with Local Fallback)
+    // Parse using Gemini Multimodal
     let extracted;
     try {
-      extracted = await parseAndNormalizeShcText(null, imageBuffer, mimeType, processingPath);
+      extracted = await parseAndNormalizeShcText(imageBuffer, mimeType);
       console.log("Extraction Result:", JSON.stringify(extracted.processedData, null, 2));
     } catch (parseError) {
       console.error("Parsing Error:", parseError.message);
@@ -73,7 +56,7 @@ const uploadShc = async (req, res, next) => {
       });
     }
 
-    // 4. Validate extraction
+    // Validate extraction
     const hasAnyValue =
       Boolean(extracted.processedData.nitrogen) ||
       Boolean(extracted.processedData.phosphorus) ||
@@ -87,24 +70,15 @@ const uploadShc = async (req, res, next) => {
       });
     }
 
-    // 5. Save to Database
-    let doc;
-    try {
-      doc = await SHC.create({
-        userId: req.user._id,
-        location: extracted.location,
-        rawData: extracted.rawData,
-        processedData: extracted.processedData,
-      });
-    } catch (dbError) {
-      console.error("MongoDB SHC.create Error:", dbError);
-      return res.status(400).json({
-        success: false,
-        message: "Failed to save SHC to database: " + dbError.message,
-      });
-    }
+    // Save to Database
+    const doc = await SHC.create({
+      userId: req.user._id,
+      location: extracted.location,
+      rawData: extracted.rawData,
+      processedData: extracted.processedData,
+    });
 
-    console.log("OCR Pipeline Successful");
+    console.log("SHC Pipeline Successful");
     console.log("-----------------------------------");
 
     return res.status(201).json({
@@ -113,17 +87,14 @@ const uploadShc = async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error("OCR Pipeline Global Error:", error.message);
+    console.error("SHC Pipeline Global Error:", error.message);
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to process SHC document",
     });
   } finally {
-    // 6. Cleanup Temporary Files
+    // Cleanup Temporary Files
     await safeUnlink(originalFilePath);
-    if (convertedImagePath) {
-      await safeUnlink(convertedImagePath);
-    }
   }
 };
 
