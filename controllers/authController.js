@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const bcrypt = require("bcrypt");
 const { signAuthToken } = require("../utils/token");
 const { sendVerificationOtp } = require("../services/emailService");
 const {
@@ -23,7 +24,7 @@ const sanitizeUser = (user) => ({
 
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
-const validateSignupInput = ({ name, email }) => {
+const validateSignupInput = ({ name, email, password }) => {
   if (!name || typeof name !== "string" || !name.trim()) {
     return "Name is required";
   }
@@ -34,13 +35,17 @@ const validateSignupInput = ({ name, email }) => {
     return "A valid email is required";
   }
 
+  if (!password || password.length < 6) {
+    return "Password is required and must be at least 6 characters long";
+  }
+
   return null;
 };
 
 const signup = async (req, res, next) => {
   try {
-    const { name, email, phone, state, district } = req.body;
-    const validationError = validateSignupInput({ name, email });
+    const { name, email, phone, state, district, password } = req.body;
+    const validationError = validateSignupInput({ name, email, password });
 
     if (validationError) {
       return res.status(400).json({
@@ -71,6 +76,7 @@ const signup = async (req, res, next) => {
     user.phone = phone ? String(phone).trim() : null;
     user.state = state ? String(state).trim() : null;
     user.district = district ? String(district).trim() : null;
+    user.password = await bcrypt.hash(password, 10);
     user.isVerified = false;
 
     applyOtpToUser(user, otpHash, otpExpiry);
@@ -235,9 +241,63 @@ const getCurrentUser = async (req, res) => {
   });
 };
 
+const login = async (req, res, next) => {
+  try {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const password = req.body.password;
+
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user || !user.password) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Please verify your account using OTP before logging in",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    const token = signAuthToken({
+      userId: user._id.toString(),
+      email: user.email,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged in successfully",
+      token,
+      user: sanitizeUser(user),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   signup,
   verifyOtp,
   resendOtp,
   getCurrentUser,
+  login,
 };
