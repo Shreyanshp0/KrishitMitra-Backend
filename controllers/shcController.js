@@ -4,6 +4,7 @@ const SHC = require("../models/SHC");
 const { extractText } = require("../services/ocrService");
 const { parseAndNormalizeShcText } = require("../services/shcParser");
 const { convertPdfToImage } = require("../utils/pdfConverter");
+const { compressImage } = require("../utils/imageProcessor");
 
 const safeUnlink = async (filePath) => {
   if (!filePath) return;
@@ -50,27 +51,20 @@ const uploadShc = async (req, res, next) => {
       }
     }
 
-    // 2. Extract Text using TrOCR
-    let text = "";
-    try {
-      text = await extractText(processingPath);
-      console.log("OCR Text:", text);
-    } catch (ocrError) {
-      console.error("OCR Pipeline Error:", ocrError.message);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to process SHC document (OCR Error)",
-      });
-    }
+    // 2. Read file into Buffer and Compress for Gemini Multimodal
+    const fsNode = require("fs");
+    let imageBuffer = fsNode.readFileSync(processingPath);
+    
+    // Compress image to save quota/tokens
+    imageBuffer = await compressImage(imageBuffer);
+    
+    const mimeType = req.file.mimetype === "application/pdf" ? "image/jpeg" : req.file.mimetype;
 
-    if (!text || text.trim() === "") {
-      throw new Error("OCR returned empty text.");
-    }
-
-    // 3. Parse and Normalize using Gemini
+    // 3. Parse using Gemini Vision (with Local Fallback)
     let extracted;
     try {
-      extracted = await parseAndNormalizeShcText(text);
+      extracted = await parseAndNormalizeShcText(null, imageBuffer, mimeType, processingPath);
+      console.log("Extraction Result:", JSON.stringify(extracted.processedData, null, 2));
     } catch (parseError) {
       console.error("Parsing Error:", parseError.message);
       return res.status(422).json({
