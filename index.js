@@ -3,6 +3,7 @@ require("dotenv").config();
 const app = require("./app");
 const connectDatabase = require("./config/database");
 const mongoose = require("mongoose");
+const startKeepAwake = require("./utils/keepAwake");
 
 const PORT = Number(process.env.PORT) || 5000;
 
@@ -41,6 +42,9 @@ const startServer = async () => {
 
     serverInstance = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on port ${PORT}`);
+      
+      // Start self-pinging to keep the server awake on platforms like Render
+      startKeepAwake(process.env.BACKEND_URL);
     });
   } catch (error) {
     console.error("Failed to start server:", error.message);

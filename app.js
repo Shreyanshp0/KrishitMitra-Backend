@@ -26,6 +26,14 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/api/keep-awake", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Server is awake!",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/shc", shcRoutes);
 app.use("/api", recommendRoutes);
