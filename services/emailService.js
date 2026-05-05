@@ -1,54 +1,33 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const { OTP_EXPIRY_MINUTES } = require("./otpService");
 
-let cachedTransporter = null;
+let resendInstance = null;
 
-const getTransporter = () => {
-  if (cachedTransporter) {
-    return cachedTransporter;
+const getResend = () => {
+  if (resendInstance) {
+    return resendInstance;
   }
 
-  const emailUser = process.env.EMAIL || process.env.EMAIL_USER;
-  const emailPass = process.env.APP_PASSWORD || process.env.EMAIL_PASS;
+  const apiKey = process.env.Resend;
 
-  if (!emailUser || !emailPass) {
-    throw new Error("EMAIL/EMAIL_USER and APP_PASSWORD/EMAIL_PASS must be set in environment variables.");
+  if (!apiKey) {
+    throw new Error("Resend API key must be set in environment variables (Resend=...).");
   }
 
-  console.log("Initializing Nodemailer transporter...");
-  console.log(`Using email user: ${emailUser}`);
-
-  // Use secure SMTP (port 465) as requested for Render compatibility
-  cachedTransporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // IMPORTANT: Use SSL/TLS
-    auth: {
-      user: emailUser,
-      pass: emailPass,
-    },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-    debug: true, // Enable debug output
-    logger: true // Log to console
-  });
-
-  console.log("Nodemailer transporter initialized with port 465.");
-
-  return cachedTransporter;
+  console.log("Initializing Resend client...");
+  resendInstance = new Resend(apiKey);
+  return resendInstance;
 };
 
 const sendVerificationOtp = async ({ email, name, otp }) => {
-  const transporter = getTransporter();
+  const resend = getResend();
 
-  console.log(`Attempting to send OTP email to ${email}...`);
+  console.log(`Attempting to send OTP email via Resend to ${email}...`);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || process.env.EMAIL || process.env.EMAIL_USER,
+  const { data, error } = await resend.emails.send({
+    from: "onboarding@resend.dev", // Note: This only works for the account owner's email unless a domain is verified
     to: email,
     subject: "Verify your account",
-    text: `Hello ${name || "there"}, your OTP is: ${otp} (valid for ${OTP_EXPIRY_MINUTES} minutes).`,
     html: `
       <p>Hello ${name || "there"},</p>
       <p>Your OTP is: <strong>${otp}</strong></p>
@@ -56,7 +35,12 @@ const sendVerificationOtp = async ({ email, name, otp }) => {
     `,
   });
 
-  console.log(`Email sent successfully to ${email}`);
+  if (error) {
+    console.error("Resend API Error:", error);
+    throw error;
+  }
+
+  console.log(`Email sent successfully via Resend. ID: ${data.id}`);
 };
 
 module.exports = {
