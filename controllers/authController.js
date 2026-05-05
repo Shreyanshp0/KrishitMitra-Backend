@@ -82,17 +82,31 @@ const signup = async (req, res, next) => {
     applyOtpToUser(user, otpHash, otpExpiry);
 
     await user.save();
-    await sendVerificationOtp({
-      email: user.email,
-      name: user.name,
-      otp,
-    });
 
-    return res.status(existingUser ? 200 : 201).json({
-      success: true,
-      message: "OTP sent to your email",
-      user: sanitizeUser(user),
-    });
+    try {
+      await sendVerificationOtp({
+        email: user.email,
+        name: user.name,
+        otp,
+      });
+
+      return res.status(existingUser ? 200 : 201).json({
+        success: true,
+        message: "OTP sent to your email",
+        user: sanitizeUser(user),
+      });
+    } catch (emailError) {
+      console.error("Email sending failed during signup:", emailError);
+      
+      // DO NOT crash signup. Return success but mention email failure.
+      // In development/testing, returning OTP in response helps verify flow.
+      return res.status(existingUser ? 200 : 201).json({
+        success: true,
+        message: "Signup successful, but email delivery failed. Please use the OTP provided below (for testing).",
+        user: sanitizeUser(user),
+        otp: otp // TEMP for testing/fallback
+      });
+    }
   } catch (error) {
     if (error.code === 11000) {
       return res.status(409).json({
@@ -219,16 +233,26 @@ const resendOtp = async (req, res, next) => {
     applyOtpToUser(user, otpHash, otpExpiry);
     await user.save();
 
-    await sendVerificationOtp({
-      email: user.email,
-      name: user.name,
-      otp,
-    });
+    try {
+      await sendVerificationOtp({
+        email: user.email,
+        name: user.name,
+        otp,
+      });
 
-    return res.status(200).json({
-      success: true,
-      message: "OTP resent successfully",
-    });
+      return res.status(200).json({
+        success: true,
+        message: "OTP resent successfully",
+      });
+    } catch (emailError) {
+      console.error("Email sending failed during OTP resend:", emailError);
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP generation successful, but email delivery failed. Please use the OTP provided below (for testing).",
+        otp: otp // TEMP for testing/fallback
+      });
+    }
   } catch (error) {
     return next(error);
   }
