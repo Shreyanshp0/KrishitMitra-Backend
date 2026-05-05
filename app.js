@@ -6,6 +6,7 @@ const authRoutes = require("./routes/authRoutes");
 const shcRoutes = require("./routes/shcRoutes");
 const recommendRoutes = require("./routes/recommendRoutes");
 const locationRoutes = require("./routes/locationRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use("/api/auth", authRoutes);
 app.use("/shc", shcRoutes);
 app.use("/api", recommendRoutes);
 app.use("/api/locations", locationRoutes);
+app.use("/api", chatRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
