@@ -77,7 +77,10 @@ Return exactly this JSON schema and nothing else:
     {
       "crop": "Crop Name",
       "reason": "Detailed reason including why it matches the soil, weather, or ODOP priority in ${selectedLanguage}.",
-      "confidence": "High/Medium/Low"
+      "confidence": "High/Medium/Low",
+      "costOfCultivation": "Estimated cost per acre (e.g., ₹15,000) in ${selectedLanguage}",
+      "estimatedROI": "Estimated profit margin or return on investment per acre in ${selectedLanguage}",
+      "fertilizers": "Recommended fertilizers to help grow the crop better in ${selectedLanguage}"
     }
   ]
 }
@@ -138,7 +141,10 @@ const getRecommendations = async ({ pipeline, soilData, location, weather, price
         {
           crop: fallbackCrop,
           reason: "Fallback recommendation triggered due to AI service unavailability. This is a locally relevant crop.",
-          confidence: "Low"
+          confidence: "Low",
+          costOfCultivation: "Unknown",
+          estimatedROI: "Unknown",
+          fertilizers: "General NPK"
         }
       ]
     };
