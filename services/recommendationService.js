@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const buildPrompt = ({ pipeline, soilData, location, weather, prices, odopCrops }) => {
+const buildPrompt = ({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage }) => {
   let soilBlock = "";
   let role = "";
 
@@ -34,6 +34,19 @@ MANUAL GENERAL INPUTS:
 You are an ${role}.
 Based on the provided location, soil data, and external factors, provide highly suitable crop recommendations.
 
+IMPORTANT LANGUAGE RULE:
+Generate the ENTIRE response only in ${selectedLanguage}.
+
+- Crop names
+- Reasons
+- Explanations
+- Confidence descriptions
+
+All text must be in ${selectedLanguage}.
+
+Use simple farmer-friendly language.
+Avoid technical jargon.
+
 -----------------------------------
 📍 LOCATION:
 - State: ${location.state || "Unknown"}
@@ -63,7 +76,7 @@ Return exactly this JSON schema and nothing else:
   "recommendations": [
     {
       "crop": "Crop Name",
-      "reason": "Detailed reason including why it matches the soil, weather, or ODOP priority.",
+      "reason": "Detailed reason including why it matches the soil, weather, or ODOP priority in ${selectedLanguage}.",
       "confidence": "High/Medium/Low"
     }
   ]
@@ -72,7 +85,7 @@ Return up to 3 recommendations. Do not include markdown formatting.
 `;
 };
 
-const getRecommendations = async ({ pipeline, soilData, location, weather, prices, odopCrops }) => {
+const getRecommendations = async ({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage }) => {
   try {
     const apiKey = process.env.GeminiAPI;
     if (!apiKey) {
@@ -80,7 +93,7 @@ const getRecommendations = async ({ pipeline, soilData, location, weather, price
     }
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const prompt = buildPrompt({ pipeline, soilData, location, weather, prices, odopCrops });
+    const prompt = buildPrompt({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage });
 
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],

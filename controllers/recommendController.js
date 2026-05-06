@@ -12,10 +12,27 @@ const recommend = async (req, res, next) => {
       });
     }
 
-    const { mode, ...manualInput } = req.body;
+    const { mode, language = "en", ...manualInput } = req.body;
+
+    const supportedLanguages = ["en", "hi", "pa", "te"];
+    if (!supportedLanguages.includes(language)) {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported language",
+      });
+    }
+
+    const languageMap = {
+      en: "English",
+      hi: "Hindi",
+      pa: "Punjabi",
+      te: "Telugu"
+    };
+    const selectedLanguage = languageMap[language] || "English";
 
     console.log("==========================================");
     console.log("Incoming Request to /api/recommend:", req.body);
+    console.log("Selected Language:", selectedLanguage);
     console.log("==========================================");
 
     if (!mode || (mode !== "auto" && mode !== "manual" && mode !== "shc")) {
@@ -83,6 +100,7 @@ const recommend = async (req, res, next) => {
       weather,
       prices,
       odopCrops,
+      selectedLanguage,
     });
 
     return res.status(200).json({
