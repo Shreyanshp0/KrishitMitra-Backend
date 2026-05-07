@@ -29,7 +29,7 @@ ${message}
 RESPONSE:
 `;
 
-  const modelsToTry = ["gemini-2.5-flash", "gemini-flash-latest"];
+  const modelsToTry = ["gemini-1.5-flash", "gemini-flash-latest"];
   let lastError = null;
 
   for (const modelName of modelsToTry) {

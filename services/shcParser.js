@@ -1,48 +1,7 @@
 const axios = require("axios");
+const { OpenAI } = require("openai");
 
-const coerceNumber = (value) => {
-  if (value === null || value === undefined || value === "") return null;
-  const normalized = String(value)
-    .replace(/,/g, ".")
-    .replace(/[^0-9.]/g, "")
-    .trim();
-
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const threshold = (envName, fallback) => {
-  const v = Number(process.env[envName]);
-  return Number.isFinite(v) ? v : fallback;
-};
-
-const normalizeNpkFromNumeric = (value, { lowMax, mediumMax }) => {
-  if (!Number.isFinite(value)) return null;
-  if (value <= lowMax) return "low";
-  if (value <= mediumMax) return "medium";
-  return "high";
-};
-
-const normalizePhFromNumeric = (value) => {
-  if (!Number.isFinite(value)) return null;
-  if (value < threshold("SHC_PH_NEUTRAL_MIN", 6.5)) return "acidic";
-  if (value <= threshold("SHC_PH_NEUTRAL_MAX", 7.5)) return "neutral";
-  return "alkaline";
-};
-
-/**
- * Calls Gemini API to parse SHC data.
- * Supports Multimodal (Image/PDF) parsing.
- */
-const getGeminiShcParsing = async (imageBuffer, mimeType) => {
-  try {
-    const apiKey = process.env.GeminiAPI;
-    if (!apiKey) throw new Error("GeminiAPI key is missing in .env");
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-    const prompt = `
+const PROMPT = `
 SYSTEM ROLE:
 You are a specialized OCR engine and Agricultural Data Scientist trained on Indian Soil Health Card (SHC) formats.
 
@@ -101,10 +60,52 @@ Do NOT include explanations or markdown.
 }
 `;
 
+const coerceNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = String(value)
+    .replace(/,/g, ".")
+    .replace(/[^0-9.]/g, "")
+    .trim();
+
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const threshold = (envName, fallback) => {
+  const v = Number(process.env[envName]);
+  return Number.isFinite(v) ? v : fallback;
+};
+
+const normalizeNpkFromNumeric = (value, { lowMax, mediumMax }) => {
+  if (!Number.isFinite(value)) return null;
+  if (value <= lowMax) return "low";
+  if (value <= mediumMax) return "medium";
+  return "high";
+};
+
+const normalizePhFromNumeric = (value) => {
+  if (!Number.isFinite(value)) return null;
+  if (value < threshold("SHC_PH_NEUTRAL_MIN", 6.5)) return "acidic";
+  if (value <= threshold("SHC_PH_NEUTRAL_MAX", 7.5)) return "neutral";
+  return "alkaline";
+};
+
+/**
+ * Calls Gemini API to parse SHC data.
+ * Supports Multimodal (Image/PDF) parsing.
+ */
+const getGeminiShcParsing = async (imageBuffer, mimeType) => {
+  try {
+    const apiKey = process.env.GeminiAPI;
+    if (!apiKey) throw new Error("GeminiAPI key is missing in .env");
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
     const payload = {
       contents: [{
         parts: [
-          { text: prompt },
+          { text: PROMPT },
           {
             inlineData: {
               mimeType: mimeType || "image/jpeg",
@@ -138,10 +139,69 @@ Do NOT include explanations or markdown.
 };
 
 /**
+ * Calls HuggingFace API using OpenAI SDK as a fallback.
+ */
+const getHuggingFaceShcParsing = async (imageBuffer, mimeType) => {
+  try {
+    const apiKey = process.env.HuggingFaceAPI;
+    if (!apiKey) throw new Error("HuggingFaceAPI key is missing in .env");
+
+    const client = new OpenAI({
+      baseURL: "https://router.huggingface.co/v1",
+      apiKey: apiKey,
+    });
+
+    const dataUrl = `data:${mimeType || "image/jpeg"};base64,${imageBuffer.toString("base64")}`;
+
+    const chatCompletion = await client.chat.completions.create({
+      model: "google/gemma-4-31B-it:together",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: PROMPT,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: dataUrl,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    let textRes = chatCompletion.choices[0]?.message?.content;
+    
+    if (!textRes) throw new Error("Invalid response format from HuggingFace");
+
+    textRes = textRes.trim();
+    if (textRes.startsWith("```json")) textRes = textRes.substring(7);
+    else if (textRes.startsWith("```")) textRes = textRes.substring(3);
+    if (textRes.endsWith("```")) textRes = textRes.substring(0, textRes.length - 3);
+    textRes = textRes.trim();
+
+    return JSON.parse(textRes);
+  } catch (error) {
+    console.error("HuggingFace Parsing Error:", error.message);
+    throw new Error("Unable to parse Soil Health Card document via fallback.");
+  }
+};
+
+/**
  * Main parser entry point.
  */
 const parseAndNormalizeShcText = async (imageBuffer, mimeType) => {
-  const geminiData = await getGeminiShcParsing(imageBuffer, mimeType);
+  let geminiData;
+  try {
+    geminiData = await getGeminiShcParsing(imageBuffer, mimeType);
+  } catch (error) {
+    console.warn("Primary Gemini parsing failed, falling back to HuggingFace...", error.message);
+    geminiData = await getHuggingFaceShcParsing(imageBuffer, mimeType);
+  }
   
   const rawData = geminiData.rawData || {};
   const processedData = geminiData.processedData || {};
