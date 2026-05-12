@@ -44,7 +44,14 @@ const startServer = async () => {
       console.log(`Server running on port ${PORT}`);
       
       // Start self-pinging to keep the server awake on platforms like Render
-      startKeepAwake(process.env.BACKEND_URL);
+      const backendUrl =
+        process.env.BACKEND_URL ||
+        process.env.RENDER_EXTERNAL_URL ||
+        (process.env.RENDER_EXTERNAL_HOSTNAME
+          ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
+          : undefined);
+
+      startKeepAwake(backendUrl);
     });
   } catch (error) {
     console.error("Failed to start server:", error.message);

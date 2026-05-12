@@ -7,7 +7,10 @@ const axios = require("axios");
  */
 const startKeepAwake = (url, intervalMinutes = 14) => {
   if (!url) {
-    console.log("Keep-awake: No backend URL provided. Self-pinging disabled.");
+    console.log(
+      "Keep-awake: No backend URL provided. Self-pinging disabled. " +
+        "Set BACKEND_URL (e.g. https://your-service.onrender.com) or rely on Render env vars (RENDER_EXTERNAL_URL / RENDER_EXTERNAL_HOSTNAME)."
+    );
     return;
   }
 
