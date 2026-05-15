@@ -1,4 +1,23 @@
-const axios = require("axios");
+let Groq;
+
+const getGroqClient = () => {
+  if (Groq) {
+    return Groq;
+  }
+
+  try {
+    Groq = require("groq-sdk");
+    return Groq;
+  } catch (error) {
+    if (error.code === "MODULE_NOT_FOUND") {
+      throw new Error(
+        "groq-sdk is not installed. Run `npm install` inside the Backend folder."
+      );
+    }
+
+    throw error;
+  }
+};
 
 const buildPrompt = ({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage }) => {
   let soilBlock = "";
@@ -90,30 +109,33 @@ Return up to 3 recommendations. Do not include markdown formatting.
 
 const getRecommendations = async ({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage }) => {
   try {
-    const apiKey = process.env.GeminiAPI;
+    const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-      throw new Error("GeminiAPI key is missing in .env");
+      throw new Error("GROQ_API_KEY is missing in .env");
     }
-    
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
     const prompt = buildPrompt({ pipeline, soilData, location, weather, prices, odopCrops, selectedLanguage });
 
-    const payload = {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-      }
-    };
+    const GroqClient = getGroqClient();
+    const groq = new GroqClient({ apiKey });
 
     console.log("==========================================");
-    console.log("Gemini Prompt:\n", prompt);
+    console.log("Groq Prompt:\n", prompt);
     console.log("==========================================");
 
-    const response = await axios.post(url, payload);
-    let textRes = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const response = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.2,
+      max_completion_tokens: 2048,
+      top_p: 1,
+      stream: false
+    });
+
+    let textRes = response?.choices?.[0]?.message?.content;
     
     if (!textRes) {
-      throw new Error("Invalid response format from Gemini (no text field found)");
+      throw new Error("Invalid response format from Groq (no text field found)");
     }
 
     textRes = textRes.trim();
@@ -126,12 +148,12 @@ const getRecommendations = async ({ pipeline, soilData, location, weather, price
       return JSON.parse(textRes);
     } catch (parseErr) {
       console.error("JSON Parse Error on text:\n", textRes);
-      throw new Error("Gemini response is not valid JSON");
+      throw new Error("Groq response is not valid JSON");
     }
   } catch (error) {
-    console.error("Gemini Error:", error.response?.data || error.message);
+    console.error("Groq Error:", error.response?.data || error.message);
     
-    console.log("Returning Fallback Response due to Gemini failure.");
+    console.log("Returning fallback response because the Groq service is unavailable.");
     
     // Fallback: Try to use an ODOP crop if available, otherwise Wheat.
     const fallbackCrop = (odopCrops && odopCrops.length > 0) ? odopCrops[0] : "Wheat";
